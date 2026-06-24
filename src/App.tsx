@@ -19,8 +19,8 @@ import {
   Wand2,
 } from 'lucide-react'
 import './App.css'
-import type { AdmissionPayload, AdvisorResult, Band, Recommendation } from './lib/advisor'
-import { buildAdvisorResult, buildFunReply, buildLocalReply, formatNumber, getProvincePolicy } from './lib/advisor'
+import type { AdmissionPayload, AdvisorResult, Band, DataSummary, Recommendation } from './lib/advisor'
+import { buildAdvisorResult, buildFunReply, buildLocalReply, formatNumber, getDataScope, getDataSummary, getProvincePolicy } from './lib/advisor'
 
 type Mode = 'gaokao' | 'fun'
 type Role = 'user' | 'assistant'
@@ -123,6 +123,53 @@ async function chatBackend(userText: string, localAnswer: string, webNotes: stri
   return String(data.content || '').trim()
 }
 
+type RawAdmissionPayload = {
+  meta?: Partial<AdmissionPayload['meta']>
+  rows?: unknown
+}
+
+const DATA_URLS = ['/data/admissions-full.json', '/data/admissions.json']
+
+function normalizeAdmissionPayload(data: RawAdmissionPayload, sourceUrl: string): AdmissionPayload {
+  const rows = Array.isArray(data.rows) ? (data.rows as AdmissionPayload['rows']) : []
+  const rowCount = rows.length
+  const meta = data.meta ?? {}
+  const fullDbRows = Number(meta.fullDbRows) || rowCount
+  const sampleRows = Number(meta.sampleRows) || rowCount
+  const baseMeta: AdmissionPayload['meta'] = {
+    generatedFrom: meta.generatedFrom || sourceUrl,
+    fullDbRows,
+    sampleRows,
+    rowCount,
+    dataScope: meta.dataScope,
+    provinces: Array.isArray(meta.provinces) ? meta.provinces : [],
+    years: Array.isArray(meta.years) ? meta.years : [],
+    keywords: Array.isArray(meta.keywords) ? meta.keywords : [],
+    note: meta.note || '',
+  }
+
+  return {
+    meta: {
+      ...baseMeta,
+      dataScope: getDataScope(baseMeta, rowCount),
+    },
+    rows,
+  }
+}
+
+async function fetchAdmissionPayload() {
+  for (const [index, url] of DATA_URLS.entries()) {
+    const response = await fetch(url)
+    const canFallback = index < DATA_URLS.length - 1
+    const contentType = response.headers.get('content-type') || ''
+    if ((response.status === 404 || !contentType.includes('application/json')) && canFallback) continue
+    if (!response.ok) throw new Error(`招生数据加载失败：HTTP ${response.status}`)
+    return normalizeAdmissionPayload((await response.json()) as RawAdmissionPayload, url)
+  }
+
+  throw new Error('招生数据文件不存在')
+}
+
 function StatusPill({ icon, label, tone = 'neutral' }: { icon: ReactNode; label: string; tone?: 'neutral' | 'good' | 'warn' }) {
   return (
     <span className={`status-pill ${tone}`}>
@@ -137,6 +184,7 @@ function Sidebar({
   currentId,
   mode,
   meta,
+  dataSummary,
   onSelect,
   onCreate,
   onDelete,
@@ -145,11 +193,13 @@ function Sidebar({
   currentId: string
   mode: Mode
   meta?: AdmissionPayload['meta']
+  dataSummary: DataSummary
   onSelect: (id: string) => void
   onCreate: () => void
   onDelete: (id: string) => void
 }) {
   const visible = conversations.filter((conversation) => conversation.mode === mode)
+  const coverageText = meta?.provinces.length ? `${meta.provinces.join('、')} · ${meta.years.join(' / ')}` : '覆盖范围以数据文件为准'
 
   return (
     <aside className="sidebar">
@@ -166,10 +216,10 @@ function Sidebar({
       <div className="data-card">
         <div className="data-card-top">
           <Database size={17} />
-          <span>内置样本数据</span>
+          <span>{dataSummary.sourceLabel}</span>
         </div>
-        <strong>{meta ? formatNumber(meta.sampleRows) : '加载中'} 行</strong>
-        <p>{meta ? `${meta.provinces.join('、')} · ${meta.years.join(' / ')}` : '正在读取真实录取样本'}</p>
+        <strong>{dataSummary.rowLabel}</strong>
+        <p>{dataSummary.isLoaded ? coverageText : '正在读取录取数据'}</p>
       </div>
 
       <div className="conversation-heading">
@@ -214,7 +264,7 @@ function Sidebar({
 
       <div className="license-note">
         <ShieldCheck size={15} />
-        <span>本地样本仅作辅助参考，正式填报请复核官方来源。</span>
+        <span>{dataSummary.isFull ? '本地数据仅作辅助参考，正式填报请复核官方来源。' : '本地样本仅作辅助参考，正式填报请复核官方来源。'}</span>
       </div>
     </aside>
   )
@@ -268,7 +318,7 @@ function TopBar({
   )
 }
 
-function EmptyState({ mode, onPrompt }: { mode: Mode; onPrompt: (prompt: string) => void }) {
+function EmptyState({ mode, dataSummary, onPrompt }: { mode: Mode; dataSummary: DataSummary; onPrompt: (prompt: string) => void }) {
   return (
     <div className="empty-state">
       <div className="empty-visual" aria-hidden="true">
@@ -278,7 +328,7 @@ function EmptyState({ mode, onPrompt }: { mode: Mode; onPrompt: (prompt: string)
       </div>
       <div>
         <h2>{mode === 'fun' ? '娱乐模式' : '报考模式'}</h2>
-        <p>{mode === 'fun' ? '适合先快速梳理想法，正式填报请切回报考逐条核数据。' : '输入省份、分数、位次和专业偏好，系统会先查样本库再组织建议。'}</p>
+        <p>{mode === 'fun' ? '适合先快速梳理想法，正式填报请切回报考逐条核数据。' : `输入省份、分数、位次和专业偏好，系统会先查${dataSummary.databaseLabel}再组织建议。`}</p>
       </div>
       <div className="prompt-row">
         {STARTER_PROMPTS.map((prompt) => (
@@ -292,13 +342,15 @@ function EmptyState({ mode, onPrompt }: { mode: Mode; onPrompt: (prompt: string)
 }
 
 function MessageBubble({ message, mode }: { message: ChatMessage; mode: Mode }) {
+  const localLabel = message.result?.dataScope === 'full' ? '本地全量' : '本地样本'
+
   return (
     <article className={`message ${message.role}`}>
       <div className="message-avatar">{message.role === 'user' ? <UserRound size={17} /> : mode === 'fun' ? <Sparkles size={17} /> : <Bot size={17} />}</div>
       <div className="message-body">
         <div className="message-meta">
           <span>{message.role === 'user' ? '你' : mode === 'fun' ? '娱乐顾问' : '志愿顾问'}</span>
-          {message.aiEnhanced ? <small>AI增强</small> : message.role === 'assistant' ? <small>本地样本</small> : null}
+          {message.aiEnhanced ? <small>AI增强</small> : message.role === 'assistant' ? <small>{localLabel}</small> : null}
         </div>
         <p>{message.content}</p>
         {message.webNotes?.length ? (
@@ -320,12 +372,14 @@ function ChatPanel({
   busy,
   onInput,
   onSubmit,
+  dataSummary,
   onPrompt,
 }: {
   conversation?: Conversation
   mode: Mode
   input: string
   busy: boolean
+  dataSummary: DataSummary
   onInput: (value: string) => void
   onSubmit: (event?: FormEvent) => void
   onPrompt: (prompt: string) => void
@@ -334,7 +388,7 @@ function ChatPanel({
     <section className="chat-panel">
       <div className="chat-scroll">
         {!conversation?.messages.length ? (
-          <EmptyState mode={mode} onPrompt={onPrompt} />
+          <EmptyState mode={mode} dataSummary={dataSummary} onPrompt={onPrompt} />
         ) : (
           conversation.messages.map((message) => <MessageBubble key={message.id} message={message} mode={conversation.mode} />)
         )}
@@ -374,7 +428,7 @@ function ChatPanel({
   )
 }
 
-function ParsedPanel({ result, meta }: { result?: AdvisorResult; meta?: AdmissionPayload['meta'] }) {
+function ParsedPanel({ result, dataSummary }: { result?: AdvisorResult; dataSummary: DataSummary }) {
   const parsed = result?.parsed
   const policy = parsed?.province ? getProvincePolicy(parsed.province) : undefined
 
@@ -395,9 +449,9 @@ function ParsedPanel({ result, meta }: { result?: AdvisorResult; meta?: Admissio
         <span>{parsed?.subject || '科类未识别'} {parsed?.avoidMajors.length ? `· 已避开 ${parsed.avoidMajors.join('、')}` : ''}</span>
       </div>
       <div className="coverage-box">
-        <span>样本覆盖</span>
-        <strong>{meta ? `${formatNumber(meta.sampleRows)} / ${formatNumber(meta.fullDbRows)} 行` : '读取中'}</strong>
-        <p>{meta?.note || '从原项目数据库抽取轻量数据用于浏览器复刻。'}</p>
+        <span>数据覆盖</span>
+        <strong>{dataSummary.rowLabel}</strong>
+        <p>{dataSummary.note}</p>
       </div>
     </section>
   )
@@ -448,12 +502,12 @@ function RecommendationColumn({ band, rows }: { band: Band; rows: Recommendation
   )
 }
 
-function InsightRail({ result, meta }: { result?: AdvisorResult; meta?: AdmissionPayload['meta'] }) {
+function InsightRail({ result, dataSummary }: { result?: AdvisorResult; dataSummary: DataSummary }) {
   const recommendations = result?.recommendations ?? { chong: [], wen: [], bao: [] }
 
   return (
     <aside className="insight-rail">
-      <ParsedPanel result={result} meta={meta} />
+      <ParsedPanel result={result} dataSummary={dataSummary} />
       <div className="recommendation-grid">
         <RecommendationColumn band="chong" rows={recommendations.chong} />
         <RecommendationColumn band="wen" rows={recommendations.wen} />
@@ -464,7 +518,7 @@ function InsightRail({ result, meta }: { result?: AdvisorResult; meta?: Admissio
         {result?.sourceNotes.length ? (
           result.sourceNotes.slice(0, 6).map((note) => <p key={note}>{note}</p>)
         ) : (
-          <p>发送问题后会列出本地样本命中的数据来源。</p>
+          <p>发送问题后会列出{dataSummary.shortLabel}命中的数据来源。</p>
         )}
       </section>
     </aside>
@@ -552,13 +606,12 @@ function App() {
 
   useEffect(() => {
     let mounted = true
-    fetch('/data/admissions.json')
-      .then((response) => response.json())
-      .then((data: AdmissionPayload) => {
+    fetchAdmissionPayload()
+      .then((data) => {
         if (mounted) setPayload(data)
       })
       .catch(() => {
-        if (mounted) setPayload({ meta: { generatedFrom: '', fullDbRows: 0, sampleRows: 0, provinces: [], years: [], keywords: [], note: '样本数据加载失败。' }, rows: [] })
+        if (mounted) setPayload({ meta: { generatedFrom: '', fullDbRows: 0, sampleRows: 0, rowCount: 0, dataScope: 'sample', provinces: [], years: [], keywords: [], note: '数据加载失败。' }, rows: [] })
       })
     return () => {
       mounted = false
@@ -615,6 +668,7 @@ function App() {
 
   const currentConversation = useMemo(() => conversations.find((conversation) => conversation.id === currentId), [conversations, currentId])
   const latestResult = useMemo(() => [...(currentConversation?.messages ?? [])].reverse().find((message) => message.result)?.result, [currentConversation])
+  const dataSummary = useMemo(() => getDataSummary(payload?.meta, payload?.rows.length), [payload])
 
   function createChat() {
     const created = createConversation(mode)
@@ -645,7 +699,8 @@ function App() {
     setBusy(true)
 
     const targetId = currentConversation?.id || currentId
-    const result = buildAdvisorResult(payload?.rows ?? [], text)
+    const dataScope = getDataScope(payload?.meta, payload?.rows.length)
+    const result = buildAdvisorResult(payload?.rows ?? [], text, dataScope)
     const userMessage: ChatMessage = { id: createId('msg'), role: 'user', content: text, createdAt: Date.now() }
 
     updateConversation(targetId, (conversation) => ({
@@ -682,7 +737,7 @@ function App() {
     }
 
     if (failureNotes.length) {
-      content = `${localAnswer}\n\n${failureNotes.join('；')}。已保留本地样本结果。`
+      content = `${localAnswer}\n\n${failureNotes.join('；')}。已保留${dataScope === 'full' ? '本地全量' : '本地样本'}结果。`
       aiEnhanced = false
     }
 
@@ -731,6 +786,7 @@ function App() {
         currentId={currentId}
         mode={mode}
         meta={payload?.meta}
+        dataSummary={dataSummary}
         onSelect={setCurrentId}
         onCreate={createChat}
         onDelete={deleteChat}
@@ -739,8 +795,8 @@ function App() {
       <main className="workspace">
         <TopBar mode={mode} dark={dark} busy={busy} onMode={setMode} onTheme={() => setDark((value) => !value)} onLogout={handleLogout} />
         <div className="workspace-grid">
-          <ChatPanel conversation={currentConversation} mode={mode} input={input} busy={busy} onInput={setInput} onSubmit={handleSend} onPrompt={setInput} />
-          <InsightRail result={latestResult} meta={payload?.meta} />
+          <ChatPanel conversation={currentConversation} mode={mode} input={input} busy={busy} dataSummary={dataSummary} onInput={setInput} onSubmit={handleSend} onPrompt={setInput} />
+          <InsightRail result={latestResult} dataSummary={dataSummary} />
         </div>
       </main>
     </div>

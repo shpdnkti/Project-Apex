@@ -15,12 +15,29 @@ export type AdmissionPayload = {
     generatedFrom: string
     fullDbRows: number
     sampleRows: number
+    rowCount?: number
+    dataScope?: DataScope
     provinces: string[]
     years: number[]
     keywords: string[]
     note: string
   }
   rows: AdmissionRow[]
+}
+
+export type DataScope = 'sample' | 'full'
+
+export type DataSummary = {
+  scope: DataScope
+  isFull: boolean
+  isLoaded: boolean
+  loadedRows: number
+  fullDbRows: number
+  sourceLabel: string
+  shortLabel: string
+  databaseLabel: string
+  rowLabel: string
+  note: string
 }
 
 export type ParsedInfo = {
@@ -38,7 +55,7 @@ export type Band = 'chong' | 'wen' | 'bao'
 
 export type Recommendation = AdmissionRow & {
   band: Band
-  source: 'sample'
+  source: DataScope
   distanceLabel: string
   matchedBy: string
 }
@@ -48,7 +65,48 @@ export type AdvisorResult = {
   recommendations: Record<Band, Recommendation[]>
   warnings: string[]
   sourceNotes: string[]
-  dataMode: 'sample' | 'needs-more-info'
+  dataMode: DataScope | 'needs-more-info'
+  dataScope: DataScope
+}
+
+export function getDataScope(meta?: AdmissionPayload['meta'], rowsLength?: number): DataScope {
+  if (meta?.dataScope === 'full') return 'full'
+  if (meta?.dataScope === 'sample') return 'sample'
+  const loadedRows = rowsLength ?? meta?.rowCount ?? meta?.sampleRows ?? 0
+  const fullDbRows = meta?.fullDbRows ?? loadedRows
+  return loadedRows > 0 && fullDbRows > 0 && loadedRows >= fullDbRows ? 'full' : 'sample'
+}
+
+export function getDataSummary(meta?: AdmissionPayload['meta'], rowsLength?: number): DataSummary {
+  const isLoaded = Boolean(meta) || typeof rowsLength === 'number'
+  const loadedRows = rowsLength ?? meta?.rowCount ?? meta?.sampleRows ?? 0
+  const fullDbRows = meta?.fullDbRows || loadedRows
+  const scope = getDataScope(meta, rowsLength)
+  const isFull = scope === 'full'
+  const rowLabel = !isLoaded
+    ? '加载中'
+    : !loadedRows
+      ? '无数据'
+      : isFull || !fullDbRows || loadedRows === fullDbRows
+        ? `${formatNumber(loadedRows)} 行`
+        : `${formatNumber(loadedRows)} / ${formatNumber(fullDbRows)} 行`
+  const defaultNote = isFull
+    ? '已加载全量录取数据；正式填报前仍需以省教育考试院和学校招生网为准。'
+    : '当前为轻量 Web 样本；完整数据请以官方考试院和学校招生网为准。'
+  const note = isFull && meta?.note && /样本|轻量|sample/i.test(meta.note) ? defaultNote : meta?.note || defaultNote
+
+  return {
+    scope,
+    isFull,
+    isLoaded,
+    loadedRows,
+    fullDbRows,
+    sourceLabel: isFull ? '内置全量数据' : '内置样本数据',
+    shortLabel: isFull ? '本地全量' : '本地样本',
+    databaseLabel: isFull ? '全量库' : '样本库',
+    rowLabel,
+    note,
+  }
 }
 
 const PROVINCES = [
@@ -301,12 +359,13 @@ function compactRows(rows: Recommendation[], limit: number) {
   return output
 }
 
-export function buildAdvisorResult(rows: AdmissionRow[], text: string): AdvisorResult {
+export function buildAdvisorResult(rows: AdmissionRow[], text: string, dataScope: DataScope = 'sample'): AdvisorResult {
   const parsed = extractInfo(text)
   const warnings: string[] = []
   const sourceNotes: string[] = []
+  const databaseLabel = dataScope === 'full' ? '全量库' : '样本库'
 
-  if (!parsed.province) warnings.push('还没识别到省份，推荐会先按样本库泛查。')
+  if (!parsed.province) warnings.push(`还没识别到省份，推荐会先按${databaseLabel}泛查。`)
   if (!parsed.rank && !parsed.score) warnings.push('缺少位次或分数，无法严格切冲稳保。')
   if (parsed.avoidMajors.length) warnings.push(`已过滤排斥方向：${parsed.avoidMajors.join('、')}`)
   if (parsed.regionAvoid.length) warnings.push(`已记录地域回避：${parsed.regionAvoid.join('、')}`)
@@ -318,6 +377,7 @@ export function buildAdvisorResult(rows: AdmissionRow[], text: string): AdvisorR
       warnings,
       sourceNotes,
       dataMode: 'needs-more-info',
+      dataScope,
     }
   }
 
@@ -329,7 +389,7 @@ export function buildAdvisorResult(rows: AdmissionRow[], text: string): AdvisorR
   const usableRows = majorRows.length >= 6 ? majorRows : targetRows
 
   if (parsed.majors.length && majorRows.length < 6) {
-    warnings.push('样本库里该专业命中较少，已临时放宽到同省相近位次。')
+    warnings.push(`${databaseLabel}里该专业命中较少，已临时放宽到同省相近位次。`)
   }
 
   const recommendations: Record<Band, Recommendation[]> = { chong: [], wen: [], bao: [] }
@@ -338,11 +398,11 @@ export function buildAdvisorResult(rows: AdmissionRow[], text: string): AdvisorR
     const band = parsed.rank ? rankBand(row.rank, parsed.rank) : scoreBand(row.score, parsed.score)
     if (!band) continue
     if (parsed.avoidMajors.length && includesAny(row.major, parsed.avoidMajors)) continue
-    const source = row.year >= 2025 ? '2025 样本库' : '2024 样本库'
+    const source = row.year >= 2025 ? `2025 ${databaseLabel}` : `2024 ${databaseLabel}`
     recommendations[band].push({
       ...row,
       band,
-      source: 'sample',
+      source: dataScope,
       distanceLabel: parsed.rank
         ? `距你位次 ${formatNumber(Math.abs(row.rank - parsed.rank))}`
         : `距你分数 ${Math.abs(row.score - parsed.score)} 分`,
@@ -360,27 +420,32 @@ export function buildAdvisorResult(rows: AdmissionRow[], text: string): AdvisorR
     },
     warnings,
     sourceNotes: Array.from(new Set(sourceNotes)).slice(0, 12),
-    dataMode: 'sample',
+    dataMode: dataScope,
+    dataScope,
   }
 }
 
-function bandLines(title: string, rows: Recommendation[]) {
-  if (!rows.length) return `${title}：样本库暂未命中。`
+function bandLines(title: string, rows: Recommendation[], dataScope: DataScope) {
+  const databaseLabel = dataScope === 'full' ? '全量库' : '样本库'
+  const dbTag = dataScope === 'full' ? '全量DB' : '样本DB'
+  if (!rows.length) return `${title}：${databaseLabel}暂未命中。`
   return [
     `${title}：`,
-    ...rows.slice(0, 5).map((row) => `- ${row.school} ${row.major}，${row.year} 年 ${row.score} 分 / ${formatNumber(row.rank)} 位 [样本DB]`),
+    ...rows.slice(0, 5).map((row) => `- ${row.school} ${row.major}，${row.year} 年 ${row.score} 分 / ${formatNumber(row.rank)} 位 [${dbTag}]`),
   ].join('\n')
 }
 
 export function buildLocalReply(result: AdvisorResult, meta?: AdmissionPayload['meta']) {
   const { parsed, recommendations } = result
   const policy = parsed.province ? getProvincePolicy(parsed.province) : undefined
+  const dataSummary = getDataSummary(meta)
+  const coverageText = meta?.provinces.length ? `覆盖 ${meta.provinces.join('、')}` : '覆盖范围以数据文件为准'
   const policyLine = policy
     ? `你是${parsed.province}考生，${policy.mode}模式，可填 ${policy.count} 个志愿。`
-    : '你还没说清省份，我先按内置样本做方向盘点。'
+    : `你还没说清省份，我先按${dataSummary.databaseLabel}做方向盘点。`
   const dataLine = meta
-    ? `当前 Web 复刻加载的是轻量样本：${formatNumber(meta.sampleRows)} 行，覆盖 ${meta.provinces.join('、')}；完整库请以原项目和考试院为准。`
-    : '当前使用内置样本数据。'
+    ? `当前加载${dataSummary.sourceLabel}：${dataSummary.rowLabel}，${coverageText}。${dataSummary.note}`
+    : '当前使用内置数据。'
   const ask = [
     !parsed.subject ? '选科/科类' : '',
     !parsed.majors.length ? '想学和排斥的专业' : '',
@@ -393,11 +458,11 @@ export function buildLocalReply(result: AdvisorResult, meta?: AdmissionPayload['
     `识别结果：${parsed.province || '省份未知'}，${parsed.score || '-'} 分，${parsed.rank ? `${formatNumber(parsed.rank)} 位` : '位次未知'}，方向：${parsed.majors.join('、') || '未限定'}。`,
     dataLine,
     '',
-    bandLines('冲', recommendations.chong),
+    bandLines('冲', recommendations.chong, result.dataScope),
     '',
-    bandLines('稳', recommendations.wen),
+    bandLines('稳', recommendations.wen, result.dataScope),
     '',
-    bandLines('保', recommendations.bao),
+    bandLines('保', recommendations.bao, result.dataScope),
     '',
     result.warnings.length ? `提醒：${result.warnings.join(' ')}` : '提醒：优先看位次，不要只看分数；所有学校仍需回到省考试院和学校招生网复核。',
     `我还需要你补充：${ask.slice(0, 2).join('、')}。`,
@@ -410,10 +475,11 @@ export function buildFunReply(text: string, result: AdvisorResult) {
     return `这条问题还缺关键数据。\n把省份、分数、位次、选科补上，我才能帮你盘出冲稳保。可以这样发：浙江物理类655分，位次10500，想学计算机电子。`
   }
   const major = parsed.majors[0] || '热门专业'
+  const databaseLabel = result.dataScope === 'full' ? '全量库' : '样本库'
   return [
     `我先按娱乐模式给你做一个快速判断。`,
     `你这条信息里我抓到的是：${parsed.province || '省份没说'}，${parsed.score || '-'} 分，${parsed.rank ? `${formatNumber(parsed.rank)} 位` : '位次没说'}，想看 ${major}。`,
     `别光盯学校名，普通家庭更要看专业壁垒、城市机会和能不能就业。${major.includes('金融') || text.includes('金融') ? '金融听着光鲜，没资源就要谨慎。' : '技术类方向可以看，但别闭眼冲冷门组。'}`,
-    `我已经在右边按样本库切了冲稳保，正经填报还是切回“报考”模式逐条核数据。`,
+    `我已经在右边按${databaseLabel}切了冲稳保，正经填报还是切回“报考”模式逐条核数据。`,
   ].join('\n')
 }

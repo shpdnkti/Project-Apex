@@ -1,24 +1,28 @@
 # 志愿规划助手
 
-一个 Material 风格的高考志愿数据工作台。应用在浏览器端解析省份、分数、位次和专业偏好，基于轻量样本数据输出冲/稳/保建议，并通过 Cloudflare Pages Functions 统一提供后台推理和 Tavily 联网摘要。
+一个 Material 风格的高考志愿数据工作台。应用在浏览器端解析省份、分数、位次和专业偏好，基于本地录取数据输出冲/稳/保建议，并通过 Cloudflare Pages Functions 统一提供后台推理和 Tavily 联网摘要。
 
 ## 功能
 
 - 聊天式高考志愿咨询，支持多会话、本地保存、报考/娱乐双模式
 - 浏览器端解析省份、分数、位次、专业偏好和排斥方向
-- 基于轻量样本数据输出冲/稳/保推荐
+- 优先加载全量录取数据，缺省回落轻量样本，并输出冲/稳/保推荐
 - 后台统一调用 OpenAI 兼容推理服务和 Tavily，浏览器不保存第三方 API Key
 - 前台密码认证、深色模式、本地数据覆盖说明和来源列表
 
 ## 数据说明
 
-`public/data/admissions.json` 是用于前端演示的轻量样本：
+前端会优先读取 `public/data/admissions-full.json`；若该文件不存在，则回落到 `public/data/admissions.json`。
+
+当前仓库内置的 `public/data/admissions.json` 仍是轻量 Web 样本：
 
 - 原始数据规模：260,884 行
-- Web 样本：5,796 行
+- 当前样本：5,796 行
 - 覆盖：安徽、山东、浙江、黑龙江；2024/2025；常见热门专业
 
-这是轻量 Web 版本，不等同于完整官方数据库。正式填报前必须以省教育考试院和学校招生网为准。
+要使用全量数据，请将同结构的 260,884 行 JSON 放到 `public/data/admissions-full.json`（推荐）或覆盖 `public/data/admissions.json`。应用会按实际 `rows.length` 判定全量/样本并自动切换界面文案。
+
+正式填报前必须以省教育考试院和学校招生网为准。
 
 ## 启动
 
