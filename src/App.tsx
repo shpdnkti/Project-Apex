@@ -5,12 +5,12 @@ import {
   CheckCircle2,
   Database,
   GraduationCap,
+  LogOut,
   Moon,
   PanelRight,
   Plus,
   Search,
   Send,
-  Settings,
   ShieldCheck,
   Sparkles,
   Sun,
@@ -43,26 +43,11 @@ type Conversation = {
   updatedAt: number
 }
 
-type SettingsState = {
-  baseUrl: string
-  apiKey: string
-  model: string
-  tavilyKey: string
-}
-
 const STORAGE = {
   conversations: 'xf_web_conversations',
   currentId: 'xf_web_current',
   mode: 'xf_web_mode',
-  settings: 'xf_web_settings',
   theme: 'xf_web_theme',
-}
-
-const DEFAULT_SETTINGS: SettingsState = {
-  baseUrl: 'https://api.deepseek.com',
-  apiKey: '',
-  model: 'deepseek-chat',
-  tavilyKey: '',
 }
 
 const STARTER_PROMPTS = [
@@ -101,75 +86,41 @@ function readStoredConversations() {
   return [createConversation('gaokao')]
 }
 
-function readStoredSettings() {
-  try {
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(STORAGE.settings) || '{}') }
-  } catch {
-    return DEFAULT_SETTINGS
-  }
-}
-
 function sanitizeConversationName(text: string) {
   return text.replace(/\s+/g, ' ').slice(0, 18) || '新对话'
 }
 
-async function callOpenAICompatible(settings: SettingsState, result: AdvisorResult, userText: string, meta?: AdmissionPayload['meta'], webNotes: string[] = []) {
-  const localAnswer = buildLocalReply(result, meta)
-  const endpoint = `${settings.baseUrl.replace(/\/+$/, '')}/v1/chat/completions`
-  const response = await fetch(endpoint, {
+async function postJson<T>(url: string, body?: unknown, unauthorizedMessage = '登录已失效，请重新登录') {
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${settings.apiKey}`,
     },
-    body: JSON.stringify({
-      model: settings.model || DEFAULT_SETTINGS.model,
-      temperature: 0.45,
-      messages: [
-        {
-          role: 'system',
-          content:
-            '你是高考志愿顾问。必须基于给定本地样本数据回答；没有数据就明说暂无数据，不能编造分数、位次和年份。回答直接、接地气、结构化。',
-        },
-        {
-          role: 'system',
-          content: `本地样本分析如下：\n${localAnswer}\n\n联网摘要：\n${webNotes.join('\n') || '未启用或无结果'}`,
-        },
-        { role: 'user', content: userText },
-      ],
-    }),
+    credentials: 'same-origin',
+    body: body === undefined ? undefined : JSON.stringify(body),
   })
+
   if (!response.ok) {
-    const error = await response.json().catch(() => undefined)
-    throw new Error(error?.error?.message || `HTTP ${response.status}`)
+    throw new Error(response.status === 401 ? unauthorizedMessage : `后台接口返回 HTTP ${response.status}`)
   }
-  const data = await response.json()
-  return String(data.choices?.[0]?.message?.content || '').trim()
+
+  return (await response.json()) as T
 }
 
-async function searchTavily(query: string, key: string) {
-  if (!key) return []
-  const response = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify({
-      query,
-      search_depth: 'basic',
-      include_answer: true,
-      max_results: 4,
-    }),
-  })
-  if (!response.ok) return []
-  const data = await response.json()
-  const notes: string[] = []
-  if (data.answer) notes.push(`[Tavily] ${data.answer}`)
-  for (const item of data.results || []) {
-    notes.push(`${item.title}: ${String(item.content || '').slice(0, 180)}`)
-  }
-  return notes.slice(0, 5)
+async function fetchSession() {
+  const response = await fetch('/api/auth/session', { credentials: 'same-origin' })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return (await response.json()) as { authenticated: boolean }
+}
+
+async function searchBackend(query: string) {
+  const data = await postJson<{ notes: string[] }>('/api/search', { query })
+  return Array.isArray(data.notes) ? data.notes : []
+}
+
+async function chatBackend(userText: string, localAnswer: string, webNotes: string[]) {
+  const data = await postJson<{ content: string }>('/api/chat', { userText, localAnswer, webNotes })
+  return String(data.content || '').trim()
 }
 
 function StatusPill({ icon, label, tone = 'neutral' }: { icon: ReactNode; label: string; tone?: 'neutral' | 'good' | 'warn' }) {
@@ -272,19 +223,17 @@ function Sidebar({
 function TopBar({
   mode,
   dark,
-  settings,
   busy,
   onMode,
   onTheme,
-  onSettings,
+  onLogout,
 }: {
   mode: Mode
   dark: boolean
-  settings: SettingsState
   busy: boolean
   onMode: (mode: Mode) => void
   onTheme: () => void
-  onSettings: () => void
+  onLogout: () => void
 }) {
   return (
     <header className="topbar">
@@ -301,8 +250,8 @@ function TopBar({
 
       <div className="topbar-status">
         <StatusPill icon={<Database size={14} />} label="本地数据" tone="good" />
-        <StatusPill icon={<Search size={14} />} label={settings.tavilyKey ? '联网搜索' : '未填 Tavily'} tone={settings.tavilyKey ? 'good' : 'warn'} />
-        <StatusPill icon={<Bot size={14} />} label={settings.apiKey ? settings.model : '本地模拟'} tone={settings.apiKey ? 'good' : 'neutral'} />
+        <StatusPill icon={<Search size={14} />} label="后台搜索" tone="good" />
+        <StatusPill icon={<Bot size={14} />} label="后台推理" tone="good" />
       </div>
 
       <div className="topbar-actions">
@@ -310,9 +259,9 @@ function TopBar({
         <button type="button" title={dark ? '切换浅色' : '切换深色'} className="icon-button" onClick={onTheme}>
           {dark ? <Sun size={18} /> : <Moon size={18} />}
         </button>
-        <button type="button" className="settings-button" onClick={onSettings}>
-          <Settings size={17} />
-          API设置
+        <button type="button" className="logout-button" onClick={onLogout}>
+          <LogOut size={17} />
+          退出登录
         </button>
       </div>
     </header>
@@ -522,62 +471,71 @@ function InsightRail({ result, meta }: { result?: AdvisorResult; meta?: Admissio
   )
 }
 
-function SettingsDialog({
-  open,
-  settings,
-  testing,
-  status,
-  onClose,
-  onChange,
-  onTest,
+function LoginPage({
+  dark,
+  checking,
+  onTheme,
+  onLogin,
 }: {
-  open: boolean
-  settings: SettingsState
-  testing: boolean
-  status: string
-  onClose: () => void
-  onChange: (settings: SettingsState) => void
-  onTest: () => void
+  dark: boolean
+  checking: boolean
+  onTheme: () => void
+  onLogin: (password: string) => Promise<void>
 }) {
-  if (!open) return null
+  const [password, setPassword] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    const value = password.trim()
+    if (!value || submitting || checking) return
+    setSubmitting(true)
+    setError('')
+    try {
+      await onLogin(value)
+      setPassword('')
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : '登录失败，请重试')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-title">
-          <h2 id="settings-title">API设置</h2>
-          <p>兼容 DeepSeek、通义、智谱和 OpenAI 风格接口；Key 只存在浏览器本地。</p>
-        </div>
-        <label>
-          Base URL
-          <input value={settings.baseUrl} onChange={(event) => onChange({ ...settings, baseUrl: event.target.value })} placeholder="https://api.deepseek.com" />
-        </label>
-        <label>
-          API Key
-          <input type="password" value={settings.apiKey} onChange={(event) => onChange({ ...settings, apiKey: event.target.value })} placeholder="sk-..." />
-        </label>
-        <label>
-          Model
-          <input value={settings.model} onChange={(event) => onChange({ ...settings, model: event.target.value })} placeholder="deepseek-chat" />
-        </label>
-        <label>
-          Tavily Key
-          <input type="password" value={settings.tavilyKey} onChange={(event) => onChange({ ...settings, tavilyKey: event.target.value })} placeholder="tvly-..." />
-        </label>
-        <div className="modal-help">
-          填 Tavily 后会尝试联网搜索学校近况和专业信息；不填也能用本地样本跑冲稳保。
-        </div>
-        <div className="modal-actions">
-          <button type="button" onClick={onClose}>
-            取消
-          </button>
-          <button type="button" className="primary" onClick={onTest} disabled={testing || !settings.baseUrl || !settings.apiKey}>
-            {testing ? '测试中' : '保存并测试'}
+    <main className="login-shell">
+      <section className="login-card" aria-labelledby="login-title">
+        <div className="login-card-top">
+          <div className="brand-mark">
+            <GraduationCap size={22} />
+          </div>
+          <button type="button" title={dark ? '切换浅色' : '切换深色'} className="icon-button" onClick={onTheme}>
+            {dark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
-        {status ? <p className="settings-status">{status}</p> : null}
+        <div className="login-title">
+          <h1 id="login-title">志愿规划助手</h1>
+          <p>{checking ? '正在验证登录状态' : '请输入访问密码'}</p>
+        </div>
+        <form className="login-form" onSubmit={handleSubmit}>
+          <label>
+            密码
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="输入后台访问密码"
+              autoComplete="current-password"
+              disabled={checking || submitting}
+            />
+          </label>
+          {error ? <p className="login-error">{error}</p> : null}
+          <button type="submit" disabled={checking || submitting || !password.trim()}>
+            {checking ? '验证中' : submitting ? '登录中' : '登录'}
+          </button>
+        </form>
       </section>
-    </div>
+    </main>
   )
 }
 
@@ -586,13 +544,11 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>(readStoredConversations)
   const [currentId, setCurrentId] = useState(() => localStorage.getItem(STORAGE.currentId) || '')
   const [mode, setMode] = useState<Mode>(() => (localStorage.getItem(STORAGE.mode) as Mode) || 'gaokao')
-  const [settings, setSettings] = useState<SettingsState>(readStoredSettings)
   const [dark, setDark] = useState(() => localStorage.getItem(STORAGE.theme) === 'dark')
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [settingsStatus, setSettingsStatus] = useState('')
+  const [sessionChecking, setSessionChecking] = useState(true)
+  const [authenticated, setAuthenticated] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -603,6 +559,24 @@ function App() {
       })
       .catch(() => {
         if (mounted) setPayload({ meta: { generatedFrom: '', fullDbRows: 0, sampleRows: 0, provinces: [], years: [], keywords: [], note: '样本数据加载失败。' }, rows: [] })
+      })
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.removeItem('xf_web_settings')
+    let mounted = true
+    fetchSession()
+      .then((session) => {
+        if (mounted) setAuthenticated(Boolean(session.authenticated))
+      })
+      .catch(() => {
+        if (mounted) setAuthenticated(false)
+      })
+      .finally(() => {
+        if (mounted) setSessionChecking(false)
       })
     return () => {
       mounted = false
@@ -625,10 +599,6 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE.mode, mode)
   }, [mode])
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE.settings, JSON.stringify(settings))
-  }, [settings])
 
   useEffect(() => {
     const current = conversations.find((conversation) => conversation.id === currentId)
@@ -686,23 +656,34 @@ function App() {
     }))
 
     let webNotes: string[] = []
-    if (settings.tavilyKey && mode === 'gaokao') {
-      webNotes = await searchTavily(text, settings.tavilyKey).catch(() => [])
-    }
-
     let content = mode === 'fun' ? buildFunReply(text, result) : buildLocalReply(result, payload?.meta)
     let aiEnhanced = false
+    const localAnswer = content
+    const failureNotes: string[] = []
 
-    if (settings.apiKey && mode === 'gaokao') {
+    if (mode === 'gaokao') {
       try {
-        const aiContent = await callOpenAICompatible(settings, result, text, payload?.meta, webNotes)
+        webNotes = await searchBackend(text)
+      } catch (error) {
+        failureNotes.push(`后台搜索失败：${error instanceof Error ? error.message : '接口不可用'}`)
+        if (error instanceof Error && error.message.includes('登录已失效')) setAuthenticated(false)
+      }
+
+      try {
+        const aiContent = await chatBackend(text, localAnswer, webNotes)
         if (aiContent) {
           content = aiContent
           aiEnhanced = true
         }
       } catch (error) {
-        content = `${content}\n\nAI增强失败：${error instanceof Error ? error.message : '接口不可用'}。已保留本地样本结果。`
+        failureNotes.push(`后台推理失败：${error instanceof Error ? error.message : '接口不可用'}`)
+        if (error instanceof Error && error.message.includes('登录已失效')) setAuthenticated(false)
       }
+    }
+
+    if (failureNotes.length) {
+      content = `${localAnswer}\n\n${failureNotes.join('；')}。已保留本地样本结果。`
+      aiEnhanced = false
     }
 
     const assistantMessage: ChatMessage = {
@@ -723,31 +704,24 @@ function App() {
     setBusy(false)
   }
 
-  async function testSettings() {
-    setTesting(true)
-    setSettingsStatus('正在测试连接...')
+  async function handleLogin(password: string) {
     try {
-      const endpoint = `${settings.baseUrl.replace(/\/+$/, '')}/v1/chat/completions`
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${settings.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: settings.model || DEFAULT_SETTINGS.model,
-          max_tokens: 8,
-          messages: [{ role: 'user', content: 'hi' }],
-        }),
-      })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      setSettingsStatus('连接OK，已保存到浏览器本地。')
-      window.setTimeout(() => setSettingsOpen(false), 700)
+      const session = await postJson<{ authenticated: boolean }>('/api/auth/login', { password }, '密码不正确')
+      if (!session.authenticated) throw new Error('登录失败，请重试')
+      setAuthenticated(true)
     } catch (error) {
-      setSettingsStatus(`连接失败：${error instanceof Error ? error.message : '未知错误'}`)
-    } finally {
-      setTesting(false)
+      throw new Error(error instanceof Error ? error.message : '登录失败，请重试')
     }
+  }
+
+  async function handleLogout() {
+    setBusy(false)
+    await postJson<{ authenticated: boolean }>('/api/auth/logout').catch(() => undefined)
+    setAuthenticated(false)
+  }
+
+  if (!authenticated) {
+    return <LoginPage dark={dark} checking={sessionChecking} onTheme={() => setDark((value) => !value)} onLogin={handleLogin} />
   }
 
   return (
@@ -763,22 +737,12 @@ function App() {
       />
 
       <main className="workspace">
-        <TopBar mode={mode} dark={dark} settings={settings} busy={busy} onMode={setMode} onTheme={() => setDark((value) => !value)} onSettings={() => setSettingsOpen(true)} />
+        <TopBar mode={mode} dark={dark} busy={busy} onMode={setMode} onTheme={() => setDark((value) => !value)} onLogout={handleLogout} />
         <div className="workspace-grid">
           <ChatPanel conversation={currentConversation} mode={mode} input={input} busy={busy} onInput={setInput} onSubmit={handleSend} onPrompt={setInput} />
           <InsightRail result={latestResult} meta={payload?.meta} />
         </div>
       </main>
-
-      <SettingsDialog
-        open={settingsOpen}
-        settings={settings}
-        testing={testing}
-        status={settingsStatus}
-        onClose={() => setSettingsOpen(false)}
-        onChange={setSettings}
-        onTest={testSettings}
-      />
     </div>
   )
 }

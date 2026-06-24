@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && npm run functions:check",
+    "functions:check": "npx -y wrangler@4.104.0 pages functions build functions --outdir /tmp/project-apex-functions --compatibility-date 2026-06-24",
     "lint": "npx -y oxlint@1.69.0",
     "preview": "vite preview",
     "cf:dev": "npm run build && npx -y wrangler@4.104.0 pages dev dist",
