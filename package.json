@@ -15,7 +15,8 @@
     "cf:list": "wrangler pages project list",
     "cf:create": "wrangler pages project create project-apex --production-branch main",
     "cf:download-config": "wrangler pages download config project-apex",
-    "cf:deploy": "npm run build && wrangler pages deploy --branch main"
+    "cf:deploy": "npm run build",
+    "cf:upload": "npm run build && wrangler pages deploy --project-name project-apex --branch main"
   },
   "dependencies": {
     "lucide-react": "^1.21.0",

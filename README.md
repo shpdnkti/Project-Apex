@@ -46,6 +46,8 @@ Dashboard 构建配置建议：
 - Build command: `npm run build`
 - Build directory: `dist`
 
+如果 Dashboard 里历史配置仍是 `npm run cf:deploy`，该脚本也只会执行构建，让 Git 连接的 Cloudflare Pages 自动发布 `dist`。不要在 Git 自动部署里调用 `wrangler pages deploy`。
+
 ```bash
 npm run cf:list
 npm run cf:create
