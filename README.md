@@ -12,11 +12,12 @@
 
 ## 数据说明
 
-前端会优先读取 `public/data/admissions-full.json.gz` 并在浏览器端解压；若该文件不可用，则依次回落到 `public/data/admissions-full.json` 和 `public/data/admissions.json`。
+前端会优先读取 `public/data/admissions-full.manifest.json`，再按 manifest 拉取全量 JSON 分片；若全量文件不可用，则依次回落到 `public/data/admissions-full.json` 和 `public/data/admissions.json`。
 
-当前仓库已内置全量压缩数据：
+当前仓库已内置全量分片数据：
 
 - 全量数据：260,884 行
+- 分片文件：`public/data/admissions-full-001.json`、`002.json`、`003.json`，单文件均低于 Cloudflare Pages 25 MiB 静态资源限制
 - 覆盖：上海、内蒙古、北京、安徽、山东、广东、江苏、河北、浙江、海南、湖北、湖南、重庆、黑龙江；2024/2025
 - 回退样本：`public/data/admissions.json`，5,796 行
 

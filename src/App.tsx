@@ -128,13 +128,18 @@ type RawAdmissionPayload = {
   rows?: unknown
 }
 
+type AdmissionManifest = {
+  meta?: Partial<AdmissionPayload['meta']>
+  chunks?: string[]
+}
+
 type DataSource = {
   url: string
-  compression?: 'gzip'
+  kind?: 'manifest'
 }
 
 const DATA_SOURCES: DataSource[] = [
-  { url: '/data/admissions-full.json.gz', compression: 'gzip' },
+  { url: '/data/admissions-full.manifest.json', kind: 'manifest' },
   { url: '/data/admissions-full.json' },
   { url: '/data/admissions.json' },
 ]
@@ -166,12 +171,22 @@ function normalizeAdmissionPayload(data: RawAdmissionPayload, sourceUrl: string)
   }
 }
 
+async function fetchJson<T>(url: string) {
+  const response = await fetch(url)
+  const contentType = response.headers.get('content-type') || ''
+  if (!response.ok || contentType.includes('text/html')) throw new Error(`招生数据加载失败：${url}`)
+  return (await response.json()) as T
+}
+
 async function parseAdmissionResponse(source: DataSource, response: Response) {
-  if (source.compression === 'gzip') {
-    if (!response.body) throw new Error('招生数据响应为空')
-    if (!('DecompressionStream' in window)) throw new Error('当前浏览器不支持读取压缩全量数据')
-    const stream = response.body.pipeThrough(new DecompressionStream('gzip'))
-    return (await new Response(stream).json()) as RawAdmissionPayload
+  if (source.kind === 'manifest') {
+    const manifest = (await response.json()) as AdmissionManifest
+    const rows: AdmissionPayload['rows'] = []
+    for (const chunk of manifest.chunks ?? []) {
+      const chunkRows = await fetchJson<AdmissionPayload['rows']>(chunk)
+      rows.push(...chunkRows)
+    }
+    return { meta: manifest.meta, rows } satisfies RawAdmissionPayload
   }
 
   return (await response.json()) as RawAdmissionPayload
@@ -184,7 +199,7 @@ async function fetchAdmissionPayload() {
     const contentType = response.headers.get('content-type') || ''
     const isFallbackHtml = contentType.includes('text/html')
     const isJson = contentType.includes('application/json')
-    if ((response.status === 404 || isFallbackHtml || (!source.compression && !isJson)) && canFallback) continue
+    if ((response.status === 404 || isFallbackHtml || !isJson) && canFallback) continue
     if (!response.ok) throw new Error(`招生数据加载失败：HTTP ${response.status}`)
     return normalizeAdmissionPayload(await parseAdmissionResponse(source, response), source.url)
   }
