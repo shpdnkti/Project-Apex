@@ -55,7 +55,7 @@ npm run build
 
 本项目使用 Vite 前端和 Cloudflare Pages Functions 后台。Wrangler 配置见 `wrangler.jsonc`，构建输出目录为 `dist`，Functions 位于 `functions/`。
 
-当前构建工具链兼容 Node 18.17+，仓库已通过 `.node-version` 固定 Cloudflare Pages 构建使用 Node 20.19.0。保持「编码 → 提交仓库 → Cloudflare 自动部署」即可。
+当前构建工具链兼容 Node 22+，仓库已通过 `.node-version` 固定 Cloudflare Pages 构建使用 Node 22.22.3。保持「编码 → 提交仓库 → Cloudflare 自动部署」即可。
 
 Dashboard 构建配置建议：
 
