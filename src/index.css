@@ -1,0 +1,101 @@
+:root {
+  --sans: Roboto, 'Noto Sans SC', 'Google Sans', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --mono: 'Roboto Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --md-primary: #1a73e8;
+  --md-primary-hover: #185abc;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #d3e3fd;
+  --md-on-primary-container: #041e49;
+  --md-secondary-container: #e8f0fe;
+  --md-on-secondary-container: #174ea6;
+  --md-tertiary-container: #e6f4ea;
+  --md-on-tertiary-container: #137333;
+  --md-success: #137333;
+  --md-success-container: #e6f4ea;
+  --md-warning: #b06000;
+  --md-warning-container: #fef7e0;
+  --md-error: #ba1a1a;
+  --md-surface: #ffffff;
+  --md-surface-dim: #f8fafd;
+  --md-surface-container-lowest: #ffffff;
+  --md-surface-container-low: #f1f4f9;
+  --md-surface-container: #eef3fb;
+  --md-on-surface: #1f1f1f;
+  --md-on-surface-variant: #5f6368;
+  --md-outline: #747775;
+  --md-outline-variant: #d9dde8;
+  --md-state-layer: rgba(26, 115, 232, 0.08);
+  --md-elevation-0: none;
+  --md-elevation-1: 0 1px 2px rgba(60, 64, 67, 0.12), 0 1px 3px rgba(60, 64, 67, 0.08);
+  --md-elevation-2: 0 2px 6px rgba(60, 64, 67, 0.16), 0 8px 18px rgba(60, 64, 67, 0.08);
+  --md-elevation-3: 0 12px 28px rgba(60, 64, 67, 0.24);
+  font-family: var(--sans);
+  color: var(--md-on-surface);
+  background: var(--md-surface-dim);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme='dark'] {
+  --md-primary: #a8c7fa;
+  --md-primary-hover: #d3e3fd;
+  --md-on-primary: #062e6f;
+  --md-primary-container: #174ea6;
+  --md-on-primary-container: #d3e3fd;
+  --md-secondary-container: #1d355f;
+  --md-on-secondary-container: #d3e3fd;
+  --md-tertiary-container: #0b3d22;
+  --md-on-tertiary-container: #c4eed0;
+  --md-success: #81c995;
+  --md-success-container: #12391f;
+  --md-warning: #fdd663;
+  --md-warning-container: #3f2f00;
+  --md-error: #ffb4ab;
+  --md-surface: #1f1f1f;
+  --md-surface-dim: #131314;
+  --md-surface-container-lowest: #171717;
+  --md-surface-container-low: #1b1b1b;
+  --md-surface-container: #242528;
+  --md-on-surface: #e3e3e3;
+  --md-on-surface-variant: #c4c7c5;
+  --md-outline: #8e918f;
+  --md-outline-variant: #444746;
+  --md-state-layer: rgba(168, 199, 250, 0.12);
+  --md-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.36), 0 1px 3px rgba(0, 0, 0, 0.24);
+  --md-elevation-2: 0 4px 10px rgba(0, 0, 0, 0.36);
+  --md-elevation-3: 0 18px 38px rgba(0, 0, 0, 0.42);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--md-surface-dim);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+  font: 14px/1.5 var(--sans);
+  letter-spacing: 0;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+#root {
+  min-height: 100svh;
+}
