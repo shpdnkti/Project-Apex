@@ -38,7 +38,7 @@ npm run build
 
 本项目是纯前端 Vite 应用，推荐部署到 Cloudflare Pages。Wrangler 配置见 `wrangler.jsonc`，构建输出目录为 `dist`。
 
-当前依赖使用 Vite 8，Cloudflare Pages 构建环境需要使用 Node 22.12+。仓库已通过 `.node-version` 固定 Node 版本，保持「编码 → 提交仓库 → Cloudflare 自动部署」即可。
+当前构建工具链兼容 Node 18.17+，仓库已通过 `.node-version` 固定 Cloudflare Pages 构建使用 Node 20.19.0。保持「编码 → 提交仓库 → Cloudflare 自动部署」即可。
 
 Dashboard 构建配置建议：
 
