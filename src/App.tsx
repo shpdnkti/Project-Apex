@@ -128,7 +128,16 @@ type RawAdmissionPayload = {
   rows?: unknown
 }
 
-const DATA_URLS = ['/data/admissions-full.json', '/data/admissions.json']
+type DataSource = {
+  url: string
+  compression?: 'gzip'
+}
+
+const DATA_SOURCES: DataSource[] = [
+  { url: '/data/admissions-full.json.gz', compression: 'gzip' },
+  { url: '/data/admissions-full.json' },
+  { url: '/data/admissions.json' },
+]
 
 function normalizeAdmissionPayload(data: RawAdmissionPayload, sourceUrl: string): AdmissionPayload {
   const rows = Array.isArray(data.rows) ? (data.rows as AdmissionPayload['rows']) : []
@@ -157,14 +166,27 @@ function normalizeAdmissionPayload(data: RawAdmissionPayload, sourceUrl: string)
   }
 }
 
+async function parseAdmissionResponse(source: DataSource, response: Response) {
+  if (source.compression === 'gzip') {
+    if (!response.body) throw new Error('招生数据响应为空')
+    if (!('DecompressionStream' in window)) throw new Error('当前浏览器不支持读取压缩全量数据')
+    const stream = response.body.pipeThrough(new DecompressionStream('gzip'))
+    return (await new Response(stream).json()) as RawAdmissionPayload
+  }
+
+  return (await response.json()) as RawAdmissionPayload
+}
+
 async function fetchAdmissionPayload() {
-  for (const [index, url] of DATA_URLS.entries()) {
-    const response = await fetch(url)
-    const canFallback = index < DATA_URLS.length - 1
+  for (const [index, source] of DATA_SOURCES.entries()) {
+    const response = await fetch(source.url)
+    const canFallback = index < DATA_SOURCES.length - 1
     const contentType = response.headers.get('content-type') || ''
-    if ((response.status === 404 || !contentType.includes('application/json')) && canFallback) continue
+    const isFallbackHtml = contentType.includes('text/html')
+    const isJson = contentType.includes('application/json')
+    if ((response.status === 404 || isFallbackHtml || (!source.compression && !isJson)) && canFallback) continue
     if (!response.ok) throw new Error(`招生数据加载失败：HTTP ${response.status}`)
-    return normalizeAdmissionPayload((await response.json()) as RawAdmissionPayload, url)
+    return normalizeAdmissionPayload(await parseAdmissionResponse(source, response), source.url)
   }
 
   throw new Error('招生数据文件不存在')

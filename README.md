@@ -12,17 +12,15 @@
 
 ## 数据说明
 
-前端会优先读取 `public/data/admissions-full.json`；若该文件不存在，则回落到 `public/data/admissions.json`。
+前端会优先读取 `public/data/admissions-full.json.gz` 并在浏览器端解压；若该文件不可用，则依次回落到 `public/data/admissions-full.json` 和 `public/data/admissions.json`。
 
-当前仓库内置的 `public/data/admissions.json` 仍是轻量 Web 样本：
+当前仓库已内置全量压缩数据：
 
-- 原始数据规模：260,884 行
-- 当前样本：5,796 行
-- 覆盖：安徽、山东、浙江、黑龙江；2024/2025；常见热门专业
+- 全量数据：260,884 行
+- 覆盖：上海、内蒙古、北京、安徽、山东、广东、江苏、河北、浙江、海南、湖北、湖南、重庆、黑龙江；2024/2025
+- 回退样本：`public/data/admissions.json`，5,796 行
 
-要使用全量数据，请将同结构的 260,884 行 JSON 放到 `public/data/admissions-full.json`（推荐）或覆盖 `public/data/admissions.json`。应用会按实际 `rows.length` 判定全量/样本并自动切换界面文案。
-
-正式填报前必须以省教育考试院和学校招生网为准。
+应用会按实际 `rows.length` 判定全量/样本并自动切换界面文案。正式填报前必须以省教育考试院和学校招生网为准。
 
 ## 启动
 
